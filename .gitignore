@@ -1,0 +1,58 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio
+.vs/
+*.rsuser
+*.DotSettings.user
+
+## Rider
+.idea/
+
+## VS Code
+.vscode/
+
+## Publish
+publish/
+
+## Runtime data
+*.pdb
+*.mdb
+*.dll
+*.exe
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+## Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+## Backup & runtime data
+backup/
+accounts.json
+
+## OS
+Thumbs.db
+.DS_Store
+desktop.ini
