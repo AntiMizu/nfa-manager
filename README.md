@@ -131,4 +131,17 @@ The status panel on the right shows the currently logged-in Steam account.
 
 ## License
 
-All Rights Reserved. No license is granted for use, modification, or distribution.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+
+This means you are free to:
+- **Use** this software for any purpose
+- **Modify** the source code
+- **Distribute** copies
+- **Distribute** modified versions
+
+Under the condition that:
+- Modified versions must also be licensed under GPL-3.0
+- Source code must be made available when distributing binaries
+- Copyright notice and license text must be included
+
+See the [LICENSE](LICENSE) file for the full license text.
