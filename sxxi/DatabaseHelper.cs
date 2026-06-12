@@ -12,9 +12,6 @@ namespace sxxi
         public string Username { get; set; } = string.Empty;
         public string SteamId { get; set; } = string.Empty;
         public string Token { get; set; } = string.Empty;
-        public bool IsUsed { get; set; }
-        public long LastLogin { get; set; }
-        public bool InConfig { get; set; }
     }
 
     public class DataStore
@@ -63,7 +60,7 @@ namespace sxxi
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error saving data: {ex.Message}");
+                Logger.Error(ex);
             }
         }
 

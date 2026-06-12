@@ -50,9 +50,13 @@ publish/
 
 ## Backup & runtime data
 backup/
+logs/
 accounts.json
 
 ## OS
 Thumbs.db
 .DS_Store
 desktop.ini
+
+## Local files
+todo.md

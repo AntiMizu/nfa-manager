@@ -89,39 +89,49 @@ namespace sxxi
             }
         }
 
-        private void BtnLoadInventory_Click(object sender, EventArgs e)
+        private async void BtnResetSteam_Click(object sender, EventArgs e)
         {
+            await ConfigHelper.ResetSteamAsync();
             RefreshStatus();
         }
 
-        private void BtnResetSteam_Click(object sender, EventArgs e)
+        private async void BtnStartSteam_Click(object sender, EventArgs e)
         {
-            ConfigHelper.ResetSteam();
+            await ConfigHelper.StartSteamAsync();
             RefreshStatus();
         }
 
-        private void BtnStartSteam_Click(object sender, EventArgs e)
+        private async void BtnKillSteam_Click(object sender, EventArgs e)
         {
-            ConfigHelper.StartSteam();
-            RefreshStatus();
-        }
-
-        private void BtnKillSteam_Click(object sender, EventArgs e)
-        {
-            ConfigHelper.KillSteam();
+            await ConfigHelper.KillSteamAsync();
             RefreshStatus();
         }
 
         private void BtnSaveConfig_Click(object sender, EventArgs e)
         {
-            ConfigHelper.SaveCurrentAccounts();
-            MessageBox.Show("Configuration saved to backup folder", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            bool success = ConfigHelper.SaveCurrentAccounts(out string error);
+            if (success)
+            {
+                MessageBox.Show("Configuration saved to backup folder", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else if (!string.IsNullOrEmpty(error))
+            {
+                MessageBox.Show($"Save error: {error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             RefreshStatus();
         }
 
-        private void BtnRestoreConfig_Click(object sender, EventArgs e)
+        private async void BtnRestoreConfig_Click(object sender, EventArgs e)
         {
-            ConfigHelper.RestoreSavedAccounts();
+            bool success = await ConfigHelper.RestoreSavedAccountsAsync(out string error);
+            if (success)
+            {
+                MessageBox.Show("Configuration restored", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else if (!string.IsNullOrEmpty(error))
+            {
+                MessageBox.Show($"Restore error: {error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             RefreshStatus();
         }
 
@@ -162,6 +172,7 @@ namespace sxxi
                     }
                     catch (Exception ex)
                     {
+                        Logger.Error(ex);
                         MessageBox.Show($"Export error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
@@ -205,6 +216,7 @@ namespace sxxi
             }
             catch (Exception ex)
             {
+                Logger.Error(ex);
                 MessageBox.Show($"File import error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -239,6 +251,7 @@ namespace sxxi
             }
             catch (Exception ex)
             {
+                Logger.Error(ex);
                 MessageBox.Show($"Paste error: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -275,28 +288,29 @@ namespace sxxi
                         accountsTable.Rows[hit.RowIndex].Selected = true;
                     }
 
-                    ContextMenuStrip contextMenu = new ContextMenuStrip();
-                    
-                    ToolStripMenuItem loginMenuItem = new ToolStripMenuItem("Login with this account");
-                    loginMenuItem.Click += (s, args) => PerformLogin();
-                    contextMenu.Items.Add(loginMenuItem);
+                    using (ContextMenuStrip contextMenu = new ContextMenuStrip())
+                    {
+                        ToolStripMenuItem loginMenuItem = new ToolStripMenuItem("Login with this account");
+                        loginMenuItem.Click += (s, args) => PerformLogin();
+                        contextMenu.Items.Add(loginMenuItem);
 
-                    ToolStripMenuItem browserMenuItem = new ToolStripMenuItem("Open profile in browser");
-                    browserMenuItem.Click += (s, args) => OpenProfileInBrowser();
-                    contextMenu.Items.Add(browserMenuItem);
+                        ToolStripMenuItem browserMenuItem = new ToolStripMenuItem("Open profile in browser");
+                        browserMenuItem.Click += (s, args) => OpenProfileInBrowser();
+                        contextMenu.Items.Add(browserMenuItem);
 
-                    contextMenu.Items.Add(new ToolStripSeparator());
+                        contextMenu.Items.Add(new ToolStripSeparator());
 
-                    ToolStripMenuItem deleteMenuItem = new ToolStripMenuItem("Remove selected");
-                    deleteMenuItem.Click += (s, args) => DeleteSelectedAccounts();
-                    contextMenu.Items.Add(deleteMenuItem);
+                        ToolStripMenuItem deleteMenuItem = new ToolStripMenuItem("Remove selected");
+                        deleteMenuItem.Click += (s, args) => DeleteSelectedAccounts();
+                        contextMenu.Items.Add(deleteMenuItem);
 
-                    contextMenu.Show(accountsTable, e.Location);
+                        contextMenu.Show(accountsTable, e.Location);
+                    }
                 }
             }
         }
 
-        private void PerformLogin()
+        private async void PerformLogin()
         {
             foreach (DataGridViewRow row in accountsTable.SelectedRows)
             {
@@ -306,7 +320,11 @@ namespace sxxi
                     var account = dataStore.GetAccount(username);
                     if (account != null)
                     {
-                        ConfigHelper.DoLogin(username, account.Token);
+                        string error = await ConfigHelper.DoLoginAsync(username, account.Token);
+                        if (!string.IsNullOrEmpty(error))
+                        {
+                            MessageBox.Show($"Login error: {error}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
                         break;
                     }
                 }
@@ -348,11 +366,6 @@ namespace sxxi
                     });
                 }
             }
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            base.OnFormClosing(e);
         }
     }
 }

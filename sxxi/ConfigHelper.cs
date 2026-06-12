@@ -5,13 +5,18 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.Win32;
-using System.Collections.Generic;
 
 namespace sxxi
 {
     public static class ConfigHelper
     {
+        private const int ProcessWaitDelayMs = 2000;
+        private const string SteamExeName = "steam.exe";
+        private const string SteamWebHelperName = "steamwebhelper.exe";
+        private const string SteamRegistryPath = @"SOFTWARE\Valve\Steam";
+
         private static string GetAppDirectory()
         {
             return AppDomain.CurrentDomain.BaseDirectory;
@@ -44,72 +49,74 @@ namespace sxxi
                 byte[] data = Convert.FromBase64String(base64);
                 return Encoding.UTF8.GetString(data);
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Error(ex);
                 return null;
             }
         }
 
-        public static void DoLogin(string accountName, string token)
+        public static async Task<string> DoLoginAsync(string accountName, string token)
         {
-            if (accountName.Contains('@'))
-            {
-                accountName = accountName.Split('@')[0];
-            }
-
-            string crc32AccountName = ComputeCrc32(accountName) + "1";
-            string jsonData = ParseEya(token);
-            if (string.IsNullOrEmpty(jsonData))
-            {
-                return;
-            }
-
-            var jsonDoc = JsonDocument.Parse(jsonData);
-            string steamId = jsonDoc.RootElement.GetProperty("sub").GetString();
-
-            string mtbf = GenerateRandomDigits(9);
-            string jwt = SteamEncrypt(token, accountName);
-            string path = GetSteamInstallPath();
-            string localVdfPath = GetLocalVdfPath();
-
-            if (File.Exists(localVdfPath))
-            {
-                File.Delete(localVdfPath);
-            }
-
             try
             {
+                if (accountName.Contains('@'))
+                {
+                    accountName = accountName.Split('@')[0];
+                }
+
+                string crc32AccountName = ComputeCrc32(accountName) + "1";
+                string jsonData = ParseEya(token);
+                if (string.IsNullOrEmpty(jsonData))
+                {
+                    return "Failed to parse token";
+                }
+
+                var jsonDoc = JsonDocument.Parse(jsonData);
+                string steamId = jsonDoc.RootElement.GetProperty("sub").GetString();
+
+                string mtbf = GenerateRandomDigits(9);
+                string jwt = SteamEncrypt(token, accountName);
+                string path = await GetSteamInstallPathAsync();
+                string localVdfPath = GetLocalVdfPath();
+
+                if (File.Exists(localVdfPath))
+                {
+                    File.Delete(localVdfPath);
+                }
+
                 Directory.CreateDirectory(Path.Combine(path, "config"));
+
+                using (var key = Registry.CurrentUser.OpenSubKey(SteamRegistryPath, true))
+                {
+                    key?.SetValue("AutoLoginUser", accountName);
+                }
+
+                string config = BuildConfig(mtbf, steamId, accountName);
+                string loginUsers = BuildLoginUsers(steamId, accountName);
+                string local = BuildLocal(crc32AccountName, jwt);
+
+                RemoveReadonly(Path.Combine(path, "config", "config.vdf"));
+                File.WriteAllText(Path.Combine(path, "config", "config.vdf"), config, Encoding.UTF8);
+
+                RemoveReadonly(Path.Combine(path, "config", "loginusers.vdf"));
+                File.WriteAllText(Path.Combine(path, "config", "loginusers.vdf"), loginUsers, Encoding.UTF8);
+
+                if (File.Exists(localVdfPath))
+                {
+                    RemoveReadonly(localVdfPath);
+                    File.Delete(localVdfPath);
+                }
+                File.WriteAllText(localVdfPath, local, Encoding.UTF8);
+
+                LaunchProcess(Path.Combine(path, SteamExeName));
+                return null;
             }
-            catch { }
-
-            using (var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Valve\Steam", true))
+            catch (Exception ex)
             {
-                key?.SetValue("AutoLoginUser", accountName);
+                Logger.Error(ex);
+                return ex.Message;
             }
-
-            string config = BuildConfig(mtbf, steamId, accountName);
-            string loginUsers = BuildLoginUsers(steamId, accountName);
-            string local = BuildLocal(crc32AccountName, jwt);
-
-            RemoveReadonly(Path.Combine(path, "config", "config.vdf"));
-            File.WriteAllText(Path.Combine(path, "config", "config.vdf"), config, Encoding.UTF8);
-
-            RemoveReadonly(Path.Combine(path, "config", "loginusers.vdf"));
-            File.WriteAllText(Path.Combine(path, "config", "loginusers.vdf"), loginUsers, Encoding.UTF8);
-
-            if (File.Exists(localVdfPath))
-            {
-                RemoveReadonly(localVdfPath);
-                File.Delete(localVdfPath);
-            }
-            File.WriteAllText(localVdfPath, local, Encoding.UTF8);
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = Path.Combine(path, "steam.exe"),
-                UseShellExecute = true
-            });
         }
 
         private static int GetPid(string processName)
@@ -127,17 +134,18 @@ namespace sxxi
             }
         }
 
-        public static string GetSteamInstallPath()
+        public static async Task<string> GetSteamInstallPathAsync()
         {
-            int steamPid = GetPid("steam.exe");
+            int steamPid = GetPid(SteamExeName);
             string steamPath;
 
             if (steamPid != 0)
             {
-                var process = Process.GetProcessById(steamPid);
-                steamPath = process.MainModule.FileName;
-                KillSteam();
-                System.Threading.Thread.Sleep(2000);
+                using (var process = Process.GetProcessById(steamPid))
+                {
+                    steamPath = process.MainModule.FileName;
+                }
+                await KillSteamAsync();
             }
             else
             {
@@ -255,6 +263,7 @@ namespace sxxi
     }}
 }}";
         }
+
         private static string GetLocalVdfPath()
         {
             string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -269,14 +278,17 @@ namespace sxxi
                 {
                     File.SetAttributes(path, FileAttributes.Normal);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Logger.Error($"RemoveReadonly failed for {path}: {ex.Message}");
+                }
             }
         }
 
-        public static void ResetSteam()
+        public static async Task ResetSteamAsync()
         {
-            string path = GetSteamInstallPath();
-            
+            string path = await GetSteamInstallPathAsync();
+
             string[] directories = {
                 Path.Combine(path, "userdata"),
                 Path.Combine(path, "config")
@@ -290,7 +302,10 @@ namespace sxxi
                     {
                         Directory.Delete(directory, true);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Logger.Error($"Failed to delete {directory}: {ex.Message}");
+                    }
                 }
             }
 
@@ -300,61 +315,67 @@ namespace sxxi
                 File.Delete(localVdfPath);
             }
 
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = Path.Combine(path, "steam.exe"),
-                UseShellExecute = true
-            });
+            LaunchProcess(Path.Combine(path, SteamExeName));
         }
 
         public static string GetCurrentAccount()
         {
             try
             {
-                using (var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Valve\Steam"))
+                using (var key = Registry.CurrentUser.OpenSubKey(SteamRegistryPath))
                 {
                     return key?.GetValue("AutoLoginUser")?.ToString();
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Error(ex);
                 return null;
             }
         }
 
-        public static void KillSteam()
+        public static async Task KillSteamAsync()
         {
-            int steamPid = GetPid("steam.exe");
+            int steamPid = GetPid(SteamExeName);
             if (steamPid != 0)
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "taskkill",
-                    Arguments = "/f /im steam.exe",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                })?.WaitForExit();
-
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "taskkill",
-                    Arguments = "/f /im steamwebhelper.exe",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                })?.WaitForExit();
-
-                System.Threading.Thread.Sleep(2000);
+                RunTaskkill(SteamExeName);
+                RunTaskkill(SteamWebHelperName);
+                await Task.Delay(ProcessWaitDelayMs);
             }
         }
 
-        public static void SaveCurrentAccounts()
+        private static void RunTaskkill(string processName)
         {
+            try
+            {
+                using (var proc = new Process())
+                {
+                    proc.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "taskkill",
+                        Arguments = $"/f /im {processName}",
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    proc.Start();
+                    proc.WaitForExit();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"taskkill {processName} failed: {ex.Message}");
+            }
+        }
+
+        public static bool SaveCurrentAccounts(out string error)
+        {
+            error = null;
             try
             {
                 string username = GetCurrentAccount();
                 string vdfPath = GetLocalVdfPath();
-                string path = GetSteamInstallPath();
-
+                string path = GetSteamInstallPathAsync().GetAwaiter().GetResult();
                 string backupPath = GetBackupPath();
 
                 string userFile = Path.Combine(backupPath, "saved_user.txt");
@@ -363,83 +384,87 @@ namespace sxxi
                     File.Delete(userFile);
                 }
 
-                try
-                {
-                    File.Copy(Path.Combine(path, "config", "config.vdf"), 
-                             Path.Combine(backupPath, "config.vdf"), true);
-                }
-                catch (Exception e) { Console.WriteLine(e); }
+                CopyFileSafe(Path.Combine(path, "config", "config.vdf"),
+                             Path.Combine(backupPath, "config.vdf"));
 
-                try
-                {
-                    File.Copy(Path.Combine(path, "config", "loginusers.vdf"), 
-                             Path.Combine(backupPath, "loginusers.vdf"), true);
-                }
-                catch (Exception e) { Console.WriteLine(e); }
+                CopyFileSafe(Path.Combine(path, "config", "loginusers.vdf"),
+                             Path.Combine(backupPath, "loginusers.vdf"));
 
-                try
-                {
-                    File.Copy(vdfPath, Path.Combine(backupPath, "local.vdf"), true);
-                }
-                catch (Exception e) { Console.WriteLine(e); }
+                CopyFileSafe(vdfPath, Path.Combine(backupPath, "local.vdf"));
 
                 if (!string.IsNullOrEmpty(username))
                 {
                     File.WriteAllText(userFile, username);
                 }
+
+                return true;
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                Console.WriteLine(e);
+                Logger.Error(ex);
+                error = ex.Message;
+                return false;
             }
         }
 
-        public static void RestoreSavedAccounts()
+        public static async Task<bool> RestoreSavedAccountsAsync(out string error)
         {
-            KillSteam();
+            error = null;
+            await KillSteamAsync();
             try
             {
                 string vdfPath = GetLocalVdfPath();
-                string path = GetSteamInstallPath();
-
+                string path = await GetSteamInstallPathAsync();
                 string backupPath = GetBackupPath();
 
-                try
-                {
-                    File.Copy(Path.Combine(backupPath, "config.vdf"), 
-                             Path.Combine(path, "config", "config.vdf"), true);
-                }
-                catch (Exception e) { Console.WriteLine(e); }
+                CopyFileSafe(Path.Combine(backupPath, "config.vdf"),
+                             Path.Combine(path, "config", "config.vdf"));
 
-                try
-                {
-                    File.Copy(Path.Combine(backupPath, "loginusers.vdf"), 
-                             Path.Combine(path, "config", "loginusers.vdf"), true);
-                }
-                catch (Exception e) { Console.WriteLine(e); }
+                CopyFileSafe(Path.Combine(backupPath, "loginusers.vdf"),
+                             Path.Combine(path, "config", "loginusers.vdf"));
 
-                try
-                {
-                    File.Copy(Path.Combine(backupPath, "local.vdf"), vdfPath, true);
-                }
-                catch (Exception e) { Console.WriteLine(e); }
+                CopyFileSafe(Path.Combine(backupPath, "local.vdf"), vdfPath);
 
-                StartSteam();
+                await StartSteamAsync();
+                return true;
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                Console.WriteLine(e);
+                Logger.Error(ex);
+                error = ex.Message;
+                return false;
             }
         }
 
-        public static void StartSteam()
+        public static async Task StartSteamAsync()
         {
-            string path = GetSteamInstallPath();
-            Process.Start(new ProcessStartInfo
+            string path = await GetSteamInstallPathAsync();
+            LaunchProcess(Path.Combine(path, SteamExeName));
+        }
+
+        private static void CopyFileSafe(string source, string destination)
+        {
+            try
             {
-                FileName = Path.Combine(path, "steam.exe"),
-                UseShellExecute = true
-            });
+                File.Copy(source, destination, true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Copy failed: {source} -> {destination}: {ex.Message}");
+            }
+        }
+
+        private static void LaunchProcess(string fileName)
+        {
+            using (var proc = new Process())
+            {
+                proc.StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    UseShellExecute = true
+                };
+                proc.Start();
+            }
         }
     }
 }
